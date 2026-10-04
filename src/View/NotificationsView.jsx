@@ -1,0 +1,1 @@
+export { NotificationsView } from '../components/NotificationsView.jsx';
