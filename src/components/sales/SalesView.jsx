@@ -1,13 +1,12 @@
 // src/components/sales/SalesView.jsx
 import React, { useState, useEffect, useRef } from 'react';
-import { 
-  Box, Grid, Card, Text, TextInput, Button, Group, Stack, 
-  Table, NumberInput, Badge, Modal, Select, Alert, Loader, Accordion, Pagination, Chip, Paper, SimpleGrid, useMantineColorScheme
+import {
+  Box, Grid, Card, Text, TextInput, Button, Group, Stack,
+  Table, NumberInput, Badge, Modal, Select, Alert, Loader, Accordion, Pagination, Paper, SimpleGrid, useMantineColorScheme
 } from '@mantine/core';
 import { 
   IconShoppingCart, 
   IconSearch, 
-  IconTag, 
   IconPackage, 
   IconTruckDelivery, 
   IconCash, 
@@ -15,7 +14,6 @@ import {
   IconTrash, 
   IconPlus, 
   IconMinus, 
-  IconReceipt, 
   IconAlertCircle,
   IconRefresh,
   IconBarcode,
@@ -36,43 +34,9 @@ export default function SalesView() {
   const { user, currentUser } = useAuth();
   const { colorScheme } = useMantineColorScheme();
   const isDark = colorScheme === 'dark';
-  const getUnitPalette = (color) => ({
-    backgroundColor: isDark ? 'var(--mantine-color-dark-6)' : {
-      ocean: '#e5f0f4',
-      orange: '#fff0d8',
-      grape: '#eee7f8',
-      teal: '#e2f3ef'
-    }[color],
-    border: `1px solid ${isDark ? `var(--mantine-color-${color}-7)` : {
-      ocean: '#6b9bad',
-      orange: '#d49a43',
-      grape: '#9b7aca',
-      teal: '#63a999'
-    }[color]}`,
-    textColor: isDark ? `${color}.2` : {
-      ocean: '#174b5c',
-      orange: '#704300',
-      grape: '#4c2b73',
-      teal: '#175b4d'
-    }[color],
-    priceColor: isDark ? `${color}.1` : {
-      ocean: '#113f4f',
-      orange: '#5a3300',
-      grape: '#382052',
-      teal: '#10483d'
-    }[color],
-    iconColor: isDark ? `var(--mantine-color-${color}-2)` : {
-      ocean: '#195f76',
-      orange: '#a45e00',
-      grape: '#7044a0',
-      teal: '#217c68'
-    }[color],
-  });
-  const piecePalette = getUnitPalette('ocean');
-  const wholesalePalette = getUnitPalette('orange');
-  const cartonPalette = getUnitPalette('grape');
-  const cratePalette = getUnitPalette('teal');
   const [products, setProducts] = useState([]);
+  const productsRef = useRef(products);
+  productsRef.current = products;
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -80,12 +44,9 @@ export default function SalesView() {
   // Barcode / Scanner input state for POS quick-add
   const [barcodeInput, setBarcodeInput] = useState('');
   const [scannerMode, setScannerMode] = useState('manual'); // 'manual' | 'camera'
+  const [scannerError, setScannerError] = useState('');
   const scannerInstanceRef = useRef(null);
-  const isStartingRef = useRef(false);
   const barcodeInputRef = useRef(null);
-
-  // Horizontal chip filter state for prices/unit types on the analysis panel
-  const [selectedPriceFilter, setSelectedPriceFilter] = useState('All');
 
   // Per-category pagination state: { [categoryName]: pageNumber }
   const [categoryPages, setCategoryPages] = useState({});
@@ -125,84 +86,114 @@ export default function SalesView() {
   // Camera scanner effect for POS Quick Scan
   useEffect(() => {
     let isMounted = true;
+    let html5QrCode = null;
 
-    if (scannerMode === 'camera' && !scannerInstanceRef.current && !isStartingRef.current) {
-      isStartingRef.current = true;
+    if (scannerMode === 'camera') {
+      if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
+        setScannerError('Camera scanning requires HTTPS (or localhost) and camera access in your browser.');
+        setScannerMode('manual');
+        return undefined;
+      }
+    }
+
+    if (scannerMode === 'camera' && !scannerInstanceRef.current) {
       const scannerId = 'pos-inline-reader';
-      const html5QrCode = new Html5Qrcode(scannerId);
+      html5QrCode = new Html5Qrcode(scannerId);
       scannerInstanceRef.current = html5QrCode;
 
-      html5QrCode.start(
-        { facingMode: 'environment' },
-        { 
-          fps: 10, 
-          qrbox: { width: 250, height: 100 },
-          aspectRatio: 1.0
-        },
-        (decodedText) => {
-          if (isMounted) {
-            handleBarcodeScanned(decodedText);
-            stopCamera();
+      const startScanner = async () => {
+        try {
+          await new Promise((resolve) => window.requestAnimationFrame(resolve));
+          if (!isMounted) return;
+          await html5QrCode.start(
+            { facingMode: 'environment' },
+            {
+              fps: 10,
+              qrbox: (width, height) => ({
+                width: Math.min(Math.floor(width * 0.85), 320),
+                height: Math.min(Math.floor(height * 0.35), 180)
+              }),
+              aspectRatio: 1.0
+            },
+            (decodedText) => {
+              if (isMounted) {
+                handleBarcodeScanned(decodedText);
+                stopCamera();
+              }
+            },
+            () => {}
+          );
+          if (!isMounted) {
+            await html5QrCode.stop();
+            html5QrCode.clear();
+            return;
           }
-        },
-        (errorMessage) => {
-          // Suppress continuous frame scanning parsing warnings
+          setScannerError('');
+        } catch (err) {
+          console.error('Failed to start POS camera feed:', err);
+          if (isMounted) {
+            const message = err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError'
+              ? 'Camera permission was denied. Allow camera access in your browser settings, then try again.'
+              : err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError'
+                ? 'No camera was found on this device.'
+                : 'Could not start the camera. Check camera permissions and close other apps using the camera.';
+            setScannerError(message);
+            setScannerMode('manual');
+          }
+          if (scannerInstanceRef.current === html5QrCode) {
+            try {
+              html5QrCode.clear();
+            } catch (cleanupError) {
+              console.error('Failed to clear POS camera scanner:', cleanupError);
+            }
+            scannerInstanceRef.current = null;
+          }
         }
-      )
-      .then(() => {
-        isStartingRef.current = false;
-      })
-      .catch((err) => {
-        console.error("Failed to start POS camera feed:", err);
-        isStartingRef.current = false;
-        if (isMounted) setScannerMode('manual');
-      });
+      };
+
+      startScanner();
     }
 
     return () => {
       isMounted = false;
       if (scannerInstanceRef.current) {
-        try {
-          if (scannerInstanceRef.current.isScanning) {
-            scannerInstanceRef.current.stop().then(() => {
-              scannerInstanceRef.current.clear();
-              scannerInstanceRef.current = null;
-            }).catch((error) => {
-              if (error?.name !== 'AbortError') {
-                console.error("Error stopping POS scanner cleanup:", error);
-              }
-            });
-          } else {
-            scannerInstanceRef.current.clear();
-            scannerInstanceRef.current = null;
+        const scanner = scannerInstanceRef.current;
+        scannerInstanceRef.current = null;
+        if (scanner.isScanning) {
+          scanner.stop().then(() => scanner.clear()).catch((err) => {
+            if (err?.name !== 'AbortError') {
+              console.error('Error stopping POS scanner cleanup:', err);
+            }
+          });
+        } else {
+          try {
+            scanner.clear();
+          } catch (err) {
+            console.error('Error clearing POS scanner cleanup:', err);
           }
-        } catch (e) {
-          scannerInstanceRef.current = null;
         }
       }
     };
-  }, [scannerMode, products]);
+  }, [scannerMode]);
 
   const stopCamera = () => {
     if (scannerInstanceRef.current) {
-      try {
-        if (scannerInstanceRef.current.isScanning) {
-          scannerInstanceRef.current.stop().then(() => {
-            scannerInstanceRef.current?.clear();
-            scannerInstanceRef.current = null;
-            setScannerMode('manual');
-          }).catch(err => {
-            console.error("Failed to cleanly stop camera", err);
-            scannerInstanceRef.current = null;
-            setScannerMode('manual');
-          });
-          return;
+      const scanner = scannerInstanceRef.current;
+      scannerInstanceRef.current = null;
+      if (scanner.isScanning) {
+        scanner.stop().then(() => scanner.clear()).catch(err => {
+          console.error('Failed to cleanly stop camera', err);
+        }).finally(() => setScannerMode('manual'));
+      } else {
+        try {
+          scanner.clear();
+        } catch (err) {
+          console.error('Failed to clear camera scanner', err);
         }
-      } catch (e) {
-        console.error(e);
+        setScannerMode('manual');
       }
+      return;
     }
-    scannerInstanceRef.current = null;
     setScannerMode('manual');
   };
 
@@ -225,15 +216,16 @@ export default function SalesView() {
   const handleBarcodeScanned = (code) => {
     if (!code) return;
     const cleanCode = code.trim().toLowerCase();
-    const matchedProduct = products.find(p => 
-      (p.barcode && p.barcode.toLowerCase() === cleanCode) || 
+    const matchedProduct = productsRef.current.find(p =>
+      (p.barcode && p.barcode.toLowerCase() === cleanCode) ||
       (p.sku && p.sku.toLowerCase() === cleanCode)
     );
 
     if (matchedProduct) {
-      handleProductClick(matchedProduct, 'piece');
+      handleProductClick(matchedProduct, matchedProduct.entryMode === 'wholesale' ? 'wholesale' : 'piece');
       notifications.show({ title: 'Scanned', message: `Added ${matchedProduct.name}`, color: 'green', autoClose: 1500 });
       setBarcodeInput('');
+      setScannerError('');
     } else {
       notifications.show({ title: 'Not Found', message: `No product matches code: ${code}`, color: 'orange' });
     }
@@ -292,41 +284,36 @@ export default function SalesView() {
     });
   };
 
-  const updateQuantity = (id, unitType, delta) => {
+  const setCartQuantity = (id, unitType, quantity) => {
     setCart(prevCart => {
-      return prevCart.map(item => {
-        if (item.id === id && item.selectedUnitType === unitType) {
-          const newQty = item.quantity + delta;
-          if (newQty <= 0) return null;
+      const currentItem = prevCart.find(item => item.id === id && item.selectedUnitType === unitType);
+      if (!currentItem || !Number.isInteger(quantity) || quantity < 0) return prevCart;
+      if (quantity === 0) return prevCart.filter(item => !(item.id === id && item.selectedUnitType === unitType));
 
-          const piecesPerUnit = item.piecesPerUnit || 1;
-          const totalRequiredStock = prevCart
-            .filter(cartItem => cartItem.id === id)
-            .reduce((sum, cartItem) => {
-              const quantity = cartItem.selectedUnitType === unitType ? newQty : cartItem.quantity;
-              return sum + quantity * (cartItem.piecesPerUnit || 1);
-            }, 0);
-
-          if (totalRequiredStock > Number(item.stock || 0)) {
-            notifications.show({ title: 'Stock Limit', message: 'Not enough stock available.', color: 'orange' });
-            return item;
-          }
-          return { ...item, quantity: newQty };
-        }
-        return item;
-      }).filter(Boolean);
+      const totalRequiredStock = prevCart
+        .filter(item => item.id === id)
+        .reduce((sum, item) => {
+          const itemQuantity = item.selectedUnitType === unitType ? quantity : item.quantity;
+          return sum + itemQuantity * (item.piecesPerUnit || 1);
+        }, 0);
+      if (totalRequiredStock > Number(currentItem.stock || 0)) {
+        notifications.show({ title: 'Stock Limit', message: 'Not enough stock available.', color: 'orange' });
+        return prevCart;
+      }
+      return prevCart.map(item => (
+        item.id === id && item.selectedUnitType === unitType ? { ...item, quantity } : item
+      ));
     });
+  };
+
+  const updateQuantity = (id, unitType, delta) => {
+    const item = cart.find(cartItem => cartItem.id === id && cartItem.selectedUnitType === unitType);
+    if (item) setCartQuantity(id, unitType, item.quantity + delta);
   };
 
   const removeFromCart = (id, unitType) => {
     setCart(prev => prev.filter(item => !(item.id === id && item.selectedUnitType === unitType)));
   };
-
-  const filteredCart = cart.filter(item => {
-    if (selectedPriceFilter === 'All') return true;
-    const unitType = (item.selectedUnitType || '').toLowerCase();
-    return unitType === selectedPriceFilter.toLowerCase();
-  });
 
   const subtotal = cart.reduce((sum, item) => {
     const itemPrice = item.selectedPrice !== undefined ? item.selectedPrice : (item.price || item.sellingPrice || 0);
@@ -386,7 +373,6 @@ export default function SalesView() {
 
       setCompletedSaleData(result.saleData);
       setCart([]);
-      setSelectedPriceFilter('All');
       closeCheckout();
       openReceipt();
       loadProducts(); 
@@ -462,58 +448,65 @@ export default function SalesView() {
               minHeight: '650px' 
             }}
           >
-            <Group justify="space-between" mb="md" wrap="wrap" className="sales-panel-heading">
+            <Group justify="space-between" mb="sm" wrap="wrap" className="sales-panel-heading">
               <Group gap="xs">
-                <IconBuildingStore size={22} color={`var(--mantine-color-ocean-${isDark ? 2 : 7})`} />
-                <Text fw={700} size="lg">POS Terminal Catalog</Text>
+                <IconBuildingStore size={20} color={`var(--mantine-color-ocean-${isDark ? 2 : 7})`} />
+                <Text fw={600} size="md">Product catalog</Text>
               </Group>
               <TextInput
-                placeholder="Search by name, SKU or barcode..."
-                leftSection={<IconSearch size={16} />}
+                size="sm"
+                placeholder="Search products, SKU or barcode"
+                leftSection={<IconSearch size={18} />}
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                style={{ width: '260px' }}
+                style={{ width: 'min(100%, 320px)' }}
               />
             </Group>
 
             {/* Quick Barcode Scanner Bar */}
-            <Box mb="md" className="sales-scanner-bar">
-              <Group justify="space-between" align="center" mb={4}>
-                <Group gap={6}>
-                  <Text size="xs" fw={500}>Quick Barcode Scanner</Text>
+            <Box mb="sm" className="sales-scanner-bar">
+              <Group justify="space-between" align="center" mb={6}>
+                <Group gap="xs">
+                  <Text size="sm" fw={600}>Scan a product</Text>
                   {scannerMode === 'manual' && (
                     <Badge size="xs" variant="light" color="ocean" leftSection={<IconDeviceDesktop size={10} />}>
-                      Hardware Ready
+                      Scanner ready
                     </Badge>
                   )}
                 </Group>
                 {scannerMode === 'manual' ? (
-                  <Button 
-                    size="compact-xs" 
-                    variant="light" 
+                  <Button
+                    size="sm"
+                    variant="light"
                     color="teal"
-                    leftSection={<IconCamera size={12} />}
-                    onClick={() => setScannerMode('camera')}
+                    leftSection={<IconCamera size={16} />}
+                    onClick={() => {
+                      setScannerError('');
+                      setScannerMode('camera');
+                    }}
                   >
-                    Use Mobile Camera
+                    Scan with camera
                   </Button>
                 ) : (
-                  <Button 
-                    size="compact-xs" 
-                    color="red" 
-                    variant="light" 
-                    leftSection={<IconX size={12} />}
+                  <Button
+                    size="sm"
+                    color="red"
+                    variant="light"
+                    leftSection={<IconX size={16} />}
                     onClick={stopCamera}
                   >
-                    Close Camera
+                    Close camera
                   </Button>
                 )}
               </Group>
 
+              {scannerError && <Alert color="red" variant="light" mb="xs" title="Camera unavailable">{scannerError}</Alert>}
+
               {scannerMode === 'manual' ? (
                 <TextInput
                   ref={barcodeInputRef}
-                  placeholder="Click & scan with hardware scanner, or type barcode..."
+                  size="sm"
+                  placeholder="Scan a barcode or enter it here"
                   value={barcodeInput}
                   onChange={(e) => setBarcodeInput(e.target.value)}
                   onKeyDown={(e) => {
@@ -521,11 +514,11 @@ export default function SalesView() {
                       handleBarcodeScanned(barcodeInput);
                     }
                   }}
-                  leftSection={<IconBarcode size={16} />}
+                  leftSection={<IconBarcode size={18} />}
                   rightSection={
-                    <Button 
-                      size="compact-xs" 
-                      variant="subtle" 
+                    <Button
+                      size="sm"
+                      variant="subtle"
                       onClick={() => handleBarcodeScanned(barcodeInput)}
                     >
                       Add
@@ -535,9 +528,9 @@ export default function SalesView() {
               ) : (
                 <Paper withBorder p="xs" radius="md" bg={isDark ? 'dark.9' : 'gray.1'} className="sales-scanner-preview">
                   <Text size="xs" c="dimmed" ta="center" mb={4}>
-                    Align product barcode within frame:
+                    Point the rear camera at the barcode
                   </Text>
-                  <div id="pos-inline-reader" style={{ width: '100%', minHeight: '140px' }}></div>
+                  <div id="pos-inline-reader" style={{ width: '100%', minHeight: '220px' }}></div>
                 </Paper>
               )}
             </Box>
@@ -548,8 +541,8 @@ export default function SalesView() {
                 <Box ta="center" py="xl"><Loader /></Box>
               ) : categoryNames.length === 0 ? (
                 <Box ta="center" py="xl">
-                  <Text c="dimmed" mb="sm">No products found in inventory or local cache.</Text>
-                  <Button variant="light" size="xs" leftSection={<IconRefresh size={14} />} onClick={loadProducts}>Refresh Catalog</Button>
+                  <Text size="md" c="dimmed" mb="sm">No products found in inventory or local cache.</Text>
+                  <Button variant="light" size="sm" leftSection={<IconRefresh size={16} />} onClick={loadProducts}>Refresh catalog</Button>
                 </Box>
               ) : (
                 <Accordion defaultValue={categoryNames} multiple variant="contained">
@@ -562,20 +555,23 @@ export default function SalesView() {
                     return (
                       <Accordion.Item key={category} value={category}>
                         <Accordion.Control>
-                          <Group justify="space-between" pr="md">
-                            <Text fw={600}>{category}</Text>
+                          <Group justify="space-between" pr="sm">
+                            <Text fw={600} size="sm">{category}</Text>
                             <Badge variant="light" size="sm">{catProducts.length} items</Badge>
                           </Group>
                         </Accordion.Control>
                         <Accordion.Panel>
                           {/* Expanded 4-Column Grid for Desktop View */}
-                          <SimpleGrid cols={{ base: 1, sm: 2, md: 3, xl: 4 }} spacing="xs" mb="md">
+                          <SimpleGrid cols={{ base: 1, sm: 2, md: 2, xl: 4 }} spacing="xs" mb="sm">
                             {paginatedCatProducts.map(product => {
                               const stockCount = Number(product.stock || 0);
                               const outOfStock = stockCount <= 0;
                               const unitPrice = product.price || product.sellingPrice || 0;
                               const wholesalePrice = Number(product.wholesalePrice || 0);
                               const uom = product.uom || 'Piece';
+                              const isWholesale = product.entryMode === 'wholesale';
+                              const primaryUnitType = isWholesale ? 'wholesale' : 'piece';
+                              const primaryPrice = isWholesale ? Number(wholesalePrice || unitPrice) : Number(unitPrice);
                               const hasCarton = product.hasCarton && Number(product.piecesPerCarton) > 0;
                               const hasCrate = product.hasCrate && Number(product.piecesPerCrate) > 0;
 
@@ -584,8 +580,8 @@ export default function SalesView() {
                                   key={product.id}
                                   className="sales-product-card"
                                   withBorder 
-                                  padding="xs" 
-                                  radius="md" 
+                                  padding="sm"
+                                  radius="sm"
                                   style={{ 
                                     opacity: outOfStock ? 0.6 : 1,
                                     backgroundColor: isDark
@@ -597,98 +593,82 @@ export default function SalesView() {
                                   }}
                                 >
                                   <div>
-                                    <Group justify="space-between" mb={4} wrap="nowrap">
-                                      <Text fw={600} size="xs" truncate style={{ flex: 1 }}>{product.name}</Text>
-                                      <Badge size="xs" color={outOfStock ? 'red' : 'green'} variant="light">
-                                        {outOfStock ? 'Out' : `${stockCount}`}
-                                      </Badge>
-                                    </Group>
-
-                                    <Stack gap={4} mt={6}>
-                                      <div
-                                        onClick={() => !outOfStock && handleProductClick(product, 'piece')}
-                                        style={{
-                                          display: 'flex',
-                                          justifyContent: 'space-between',
-                                          alignItems: 'center',
-                                          padding: '4px 8px',
-                                          backgroundColor: piecePalette.backgroundColor,
-                                          borderRadius: '4px',
-                                          cursor: outOfStock ? 'not-allowed' : 'pointer',
-                                          border: piecePalette.border
-                                        }}
+                                    <Stack gap={4} mb="xs">
+                                      <Text
+                                        className="sales-product-name"
+                                        fw={600}
+                                        size="sm"
+                                        title={product.name}
                                       >
-                                        <Group gap={4}>
-                                          <IconPackage size={12} color={piecePalette.iconColor} />
-                                          <Text size="10px" fw={500} c={piecePalette.textColor} tt="uppercase">{uom}</Text>
-                                        </Group>
-                                        <Text size="xs" fw={700} c={piecePalette.priceColor}>₦{Number(unitPrice).toFixed(2)}</Text>
-                                      </div>
+                                        {product.name}
+                                      </Text>
+                                      <Badge
+                                        className="sales-product-stock"
+                                        size="xs"
+                                        color={outOfStock ? 'red' : 'green'}
+                                        variant="light"
+                                      >
+                                        {outOfStock ? 'Out of stock' : `${stockCount} ${uom} available`}
+                                      </Badge>
+                                    </Stack>
 
-                                      {wholesalePrice > 0 && (
-                                        <div
-                                          onClick={() => !outOfStock && handleProductClick(product, 'wholesale')}
-                                          style={{
-                                            display: 'flex',
-                                            justifyContent: 'space-between',
-                                            alignItems: 'center',
-                                            padding: '4px 8px',
-                                            backgroundColor: wholesalePalette.backgroundColor,
-                                            borderRadius: '4px',
-                                            cursor: outOfStock ? 'not-allowed' : 'pointer',
-                                            border: wholesalePalette.border
-                                          }}
-                                        >
-                                          <Group gap={4}>
-                                            <IconTruckDelivery size={12} color={wholesalePalette.iconColor} />
-                                            <Text size="10px" fw={500} c={wholesalePalette.textColor}>W/Sale</Text>
+                                    <Stack gap={6}>
+                                      <Button
+                                        className="sales-unit-button"
+                                        fullWidth
+                                        size="sm"
+                                        variant="light"
+                                        color={isWholesale ? 'orange' : 'ocean'}
+                                        disabled={outOfStock}
+                                        onClick={() => handleProductClick(product, primaryUnitType)}
+                                      >
+                                        <div className="sales-unit-button-content">
+                                          <Group className="sales-unit-button-label" gap={4} wrap="nowrap">
+                                            {isWholesale ? <IconTruckDelivery size={18} /> : <IconPackage size={18} />}
+                                            <Text size="sm" fw={600}>{isWholesale ? 'Price' : uom}</Text>
                                           </Group>
-                                          <Text size="xs" fw={700} c={wholesalePalette.priceColor}>₦{wholesalePrice.toFixed(2)}</Text>
+                                          <Text className="sales-unit-button-price" size="xs" fw={700}>₦{primaryPrice.toFixed(2)}</Text>
                                         </div>
-                                      )}
+                                      </Button>
 
                                       {hasCarton && (
-                                        <div
-                                          onClick={() => !outOfStock && handleProductClick(product, 'carton')}
-                                          style={{
-                                            display: 'flex',
-                                            justifyContent: 'space-between',
-                                            alignItems: 'center',
-                                            padding: '4px 8px',
-                                            backgroundColor: cartonPalette.backgroundColor,
-                                            borderRadius: '4px',
-                                            cursor: outOfStock ? 'not-allowed' : 'pointer',
-                                            border: cartonPalette.border
-                                          }}
+                                        <Button
+                                          className="sales-unit-button"
+                                          fullWidth
+                                          size="xs"
+                                          variant="light"
+                                          color="grape"
+                                          disabled={outOfStock}
+                                          onClick={() => handleProductClick(product, 'carton')}
                                         >
-                                          <Group gap={4}>
-                                            <IconBoxSeam size={12} color={cartonPalette.iconColor} />
-                                            <Text size="10px" fw={500} c={cartonPalette.textColor}>Carton</Text>
-                                          </Group>
-                                          <Text size="xs" fw={700} c={cartonPalette.priceColor}>₦{Number(product.pricePerCarton || 0).toFixed(2)}</Text>
-                                        </div>
+                                          <div className="sales-unit-button-content">
+                                            <Group className="sales-unit-button-label" gap={4} wrap="nowrap">
+                                              <IconBoxSeam size={16} />
+                                              <Text size="xs" fw={500}>Carton</Text>
+                                            </Group>
+                                            <Text className="sales-unit-button-price" size="xs" fw={600}>₦{Number(product.pricePerCarton || 0).toFixed(2)}</Text>
+                                          </div>
+                                        </Button>
                                       )}
 
                                       {hasCrate && (
-                                        <div
-                                          onClick={() => !outOfStock && handleProductClick(product, 'crate')}
-                                          style={{
-                                            display: 'flex',
-                                            justifyContent: 'space-between',
-                                            alignItems: 'center',
-                                            padding: '4px 8px',
-                                            backgroundColor: cratePalette.backgroundColor,
-                                            borderRadius: '4px',
-                                            cursor: outOfStock ? 'not-allowed' : 'pointer',
-                                            border: cratePalette.border
-                                          }}
+                                        <Button
+                                          className="sales-unit-button"
+                                          fullWidth
+                                          size="xs"
+                                          variant="light"
+                                          color="teal"
+                                          disabled={outOfStock}
+                                          onClick={() => handleProductClick(product, 'crate')}
                                         >
-                                          <Group gap={4}>
-                                            <IconBoxSeam size={12} color={cratePalette.iconColor} />
-                                            <Text size="10px" fw={500} c={cratePalette.textColor}>Crate</Text>
-                                          </Group>
-                                          <Text size="xs" fw={700} c={cratePalette.priceColor}>₦{Number(product.pricePerCrate || 0).toFixed(2)}</Text>
-                                        </div>
+                                          <div className="sales-unit-button-content">
+                                            <Group className="sales-unit-button-label" gap={4} wrap="nowrap">
+                                              <IconBoxSeam size={16} />
+                                              <Text size="xs" fw={500}>Crate</Text>
+                                            </Group>
+                                            <Text className="sales-unit-button-price" size="xs" fw={600}>₦{Number(product.pricePerCrate || 0).toFixed(2)}</Text>
+                                          </div>
+                                        </Button>
                                       )}
                                     </Stack>
                                   </div>
@@ -717,7 +697,7 @@ export default function SalesView() {
           </Card>
         </Grid.Col>
 
-        {/* Right Side: Current Sale Analysis with Horizontal Price/Unit Chip List */}
+        {/* Current sale cart */}
         <Grid.Col span={{ base: 12, md: 5, lg: 4 }}>
           <Card 
             className="sales-panel sales-cart-panel"
@@ -732,52 +712,64 @@ export default function SalesView() {
               minHeight: '650px' 
             }}
           >
-            <Group justify="space-between" mb="sm" className="sales-panel-heading">
+            <Group justify="space-between" mb="xs" className="sales-panel-heading">
               <Group gap="xs">
-                <IconShoppingCart size={20} color={`var(--mantine-color-ocean-${isDark ? 2 : 7})`} />
-                <Text fw={700} size="lg">Current Sale Analysis</Text>
+                <IconShoppingCart size={18} color={`var(--mantine-color-ocean-${isDark ? 2 : 7})`} />
+                <Text fw={600} size="md">Sale cart</Text>
               </Group>
-              <Badge leftSection={<IconTag size={12} />}>{totalItems} items</Badge>
+              <Badge size="sm">{totalItems} items</Badge>
             </Group>
 
-            {/* Horizontal Price / Unit Filter Chip List */}
-            <Box mb="md" style={{ overflowX: 'auto', whiteSpace: 'nowrap', paddingBottom: '4px' }}>
-              <Chip.Group multiple={false} value={selectedPriceFilter} onChange={setSelectedPriceFilter}>
-                <Group gap="xs" wrap="nowrap">
-                  <Chip value="All" size="sm" variant="outline">All Prices</Chip>
-                  <Chip value="piece" size="sm" variant="outline">Retail / Piece</Chip>
-                  <Chip value="wholesale" size="sm" variant="outline">Wholesale</Chip>
-                  <Chip value="carton" size="sm" variant="outline">Carton</Chip>
-                  <Chip value="crate" size="sm" variant="outline">Crate</Chip>
-                </Group>
-              </Chip.Group>
-            </Box>
-
             {/* Cart Items List */}
-            <Box style={{ flex: 1, overflowY: 'auto', marginBottom: '1rem' }}>
-              {filteredCart.length === 0 ? (
-                <Text c="dimmed" ta="center" py="xl">No items match the selected price filter.</Text>
+            <Box style={{ flex: 1, overflowY: 'auto', marginBottom: '0.5rem' }}>
+              {cart.length === 0 ? (
+                <Stack align="center" justify="center" py="lg" gap={4}>
+                  <IconShoppingCart size={28} color="var(--mantine-color-gray-5)" />
+                  <Text size="sm" fw={500} ta="center">Your cart is empty</Text>
+                  <Text size="xs" c="dimmed" ta="center">Scan a barcode or tap a product to add it.</Text>
+                </Stack>
               ) : (
                 <Table verticalSpacing="xs">
                   <Table.Tbody>
-                    {filteredCart.map(item => {
+                    {cart.map(item => {
                       const unitPrice = item.selectedPrice !== undefined ? item.selectedPrice : (item.price || item.sellingPrice || 0);
-                      const displayUnit = item.selectedUnitType || item.uom || 'Piece';
+                      const displayUnit = item.selectedUnitType === 'wholesale'
+                        ? 'Wholesale'
+                        : item.selectedUnitType || item.uom || 'Piece';
+                      const otherReservedUnits = cart
+                        .filter(cartItem => cartItem.id === item.id && cartItem.selectedUnitType !== item.selectedUnitType)
+                        .reduce((sum, cartItem) => sum + cartItem.quantity * (cartItem.piecesPerUnit || 1), 0);
+                      const maxQuantity = Math.floor(
+                        (Number(item.stock || 0) - otherReservedUnits) / (item.piecesPerUnit || 1)
+                      );
                       return (
                         <Table.Tr key={`${item.id}-${item.selectedUnitType}`}>
                           <Table.Td>
                             <Text size="sm" fw={500}>{item.name}</Text>
-                            <Group gap={6}>
-                              <Badge size="xs" variant="outline" tt="uppercase">{displayUnit}</Badge>
-                              <Text size="xs" c="dimmed">₦{unitPrice} / {displayUnit}</Text>
+                            <Group gap={6} mt={2}>
+                              <Badge size="xs" variant="light">{displayUnit}</Badge>
+                              <Text size="xs" fw={500}>₦{Number(unitPrice).toFixed(2)} each</Text>
                             </Group>
                           </Table.Td>
-                          <Table.Td align="right" width={130}>
+                          <Table.Td align="right" width={170}>
                             <Group gap={4} justify="flex-end" wrap="nowrap">
-                              <Button size="compact-xs" variant="light" onClick={() => updateQuantity(item.id, item.selectedUnitType, -1)}><IconMinus size={12} /></Button>
-                              <Text size="sm" fw={600} style={{ width: '20px', textAlign: 'center' }}>{item.quantity}</Text>
-                              <Button size="compact-xs" variant="light" onClick={() => updateQuantity(item.id, item.selectedUnitType, 1)}><IconPlus size={12} /></Button>
-                              <Button size="compact-xs" color="red" variant="subtle" onClick={() => removeFromCart(item.id, item.selectedUnitType)}><IconTrash size={12} /></Button>
+                              <Button size="compact-sm" variant="light" aria-label={`Decrease ${item.name} quantity`} onClick={() => updateQuantity(item.id, item.selectedUnitType, -1)}><IconMinus size={14} /></Button>
+                              <NumberInput
+                                aria-label={`Quantity of ${item.name}`}
+                                value={item.quantity}
+                                onChange={(value) => {
+                                  if (value !== '' && Number.isInteger(Number(value)) && Number(value) >= 1) {
+                                    setCartQuantity(item.id, item.selectedUnitType, Number(value));
+                                  }
+                                }}
+                                min={1}
+                                max={maxQuantity}
+                                allowDecimal={false}
+                                size="sm"
+                                w={76}
+                              />
+                              <Button size="compact-sm" variant="light" aria-label={`Increase ${item.name} quantity`} onClick={() => updateQuantity(item.id, item.selectedUnitType, 1)}><IconPlus size={14} /></Button>
+                              <Button size="compact-sm" color="red" variant="subtle" aria-label={`Remove ${item.name}`} onClick={() => removeFromCart(item.id, item.selectedUnitType)}><IconTrash size={14} /></Button>
                             </Group>
                           </Table.Td>
                         </Table.Tr>
@@ -789,16 +781,16 @@ export default function SalesView() {
             </Box>
 
             {/* Subtotal & Checkout Action */}
-            <Box pt="md" style={{ borderTop: '1px solid var(--mantine-color-default-border)' }}>
-              <Group justify="space-between" mb="xs">
-                <Text size="md" fw={600}>Subtotal:</Text>
-                <Text size="lg" fw={700}>₦{subtotal.toFixed(2)}</Text>
+            <Box pt="sm" style={{ borderTop: '1px solid var(--mantine-color-default-border)' }}>
+              <Group justify="space-between" mb={6}>
+                <Text size="sm" fw={500}>Subtotal:</Text>
+                <Text size="md" fw={600}>₦{subtotal.toFixed(2)}</Text>
               </Group>
 
               <Button 
                 fullWidth 
                 color="ocean" 
-                size="md" 
+                size="sm"
                 leftSection={<IconCash size={18} />}
                 disabled={cart.length === 0}
                 onClick={handleOpenCheckout}

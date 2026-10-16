@@ -233,9 +233,9 @@ export default function ProductModal({ opened, onClose, product, onRefresh }) {
                 <NumberInput label="Selling price" leftSection="₦" min={0} decimalScale={2} value={formData.sellingPrice} onChange={value => setField('sellingPrice', value)} required />
               </Grid.Col>
               <Grid.Col span={{ base: 12, sm: 4 }}>
-                <NumberInput label={product ? 'Current quantity' : 'Quantity'} min={0} value={formData.stock} onChange={value => setField('stock', value)} disabled={!!product} required={!product} />
+                <NumberInput label={product ? 'Current quantity' : 'Quantity'} min={0} value={formData.stock} onChange={value => setField('stock', value)} required />
               </Grid.Col>
-              {product && <Grid.Col span={12}><Text size="xs" c="dimmed">Use Add stock from the product list to change quantity.</Text></Grid.Col>}
+              {product && <Grid.Col span={12}><Text size="xs" c="dimmed">Set the current quantity here. Use Add stock to record newly received stock.</Text></Grid.Col>}
             </Grid>
           ) : (
           <Accordion defaultValue="basic">
@@ -285,8 +285,8 @@ export default function ProductModal({ opened, onClose, product, onRefresh }) {
               <Accordion.Panel>
                 <Grid>
                   <Grid.Col span={{ base: 12, sm: 6 }}>
-                    <NumberInput label={product ? 'Current stock' : 'Opening stock'} min={0} value={formData.stock} onChange={value => setField('stock', value)} disabled={!!product} required={!product} />
-                    {product && <Text size="xs" c="dimmed" mt={4}>Use Add stock from the product list to change stock safely.</Text>}
+                    <NumberInput label={product ? 'Current stock' : 'Opening stock'} min={0} value={formData.stock} onChange={value => setField('stock', value)} required />
+                    {product && <Text size="xs" c="dimmed" mt={4}>Set the current quantity here. Use Add stock to record newly received stock.</Text>}
                   </Grid.Col>
                   <Grid.Col span={{ base: 12, sm: 6 }}><NumberInput label="Reorder alert at" min={0} value={formData.reorderPoint} onChange={value => setField('reorderPoint', value)} /></Grid.Col>
                   <Grid.Col span={12}><Switch label="Product is active and available at checkout" checked={formData.isActive} onChange={event => setField('isActive', event.currentTarget.checked)} /></Grid.Col>

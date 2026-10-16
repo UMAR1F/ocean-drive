@@ -126,7 +126,7 @@ export default function ReceiptModal({ opened, onClose, saleData }) {
         </Group>
 
         <Box ta="center" mt="xl">
-          <Text size="xs" c="dimmed" style={{ whiteSpace: 'pre-line' }}>{storeSettings.receiptFooter}</Text>
+          <Text size="sm" fw={700} c="dark" style={{ whiteSpace: 'pre-line' }}>{storeSettings.receiptFooter}</Text>
         </Box>
 
         <Group justify="flex-end" mt="md">

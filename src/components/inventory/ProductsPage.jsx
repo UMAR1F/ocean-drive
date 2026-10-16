@@ -268,9 +268,9 @@ export default function ProductsPage() {
                 <NumberInput label="Selling price" placeholder="0.00" leftSection={<IconCurrencyNaira size={16} />} value={formData.sellingPrice} onChange={(value) => setFormData((current) => ({ ...current, sellingPrice: value }))} min={0} required />
               </Grid.Col>
               <Grid.Col span={{ base: 12, md: 4 }}>
-                <NumberInput label={editingId ? 'Current quantity' : 'Quantity'} placeholder="0" value={formData.stock} onChange={(value) => setFormData((current) => ({ ...current, stock: value }))} min={0} disabled={Boolean(editingId)} required={!editingId} />
+                <NumberInput label={editingId ? 'Current quantity' : 'Quantity'} placeholder="0" value={formData.stock} onChange={(value) => setFormData((current) => ({ ...current, stock: value }))} min={0} required />
               </Grid.Col>
-              {editingId && <Grid.Col span={12}><Text size="xs" c="dimmed">Use Add stock from the product list to change quantity.</Text></Grid.Col>}
+              {editingId && <Grid.Col span={12}><Text size="xs" c="dimmed">Set the current quantity here. Use Add stock to record newly received stock.</Text></Grid.Col>}
             </Grid>
           ) : (
         <Accordion defaultValue="basic" variant="contained">

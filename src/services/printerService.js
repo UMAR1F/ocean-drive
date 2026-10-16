@@ -76,12 +76,14 @@ export const printerService = {
               body {
                 font-family: 'Courier New', Courier, monospace;
                 font-size: 12px;
+                font-weight: 700;
                 color: #000;
                 box-sizing: border-box;
                 width: ${contentWidth}mm;
                 margin: 0 auto;
                 padding: 1.5mm;
               }
+              * { font-weight: 700; }
               .center { text-align: center; }
               .bold { font-weight: bold; }
               .flex { display: flex; justify-content: space-between; }
@@ -89,6 +91,14 @@ export const printerService = {
               table { width: 100%; border-collapse: collapse; }
               th, td { font-size: 12px; text-align: left; padding: 2px 0; }
               td.right, th.right { text-align: right; }
+              .receipt-footer {
+                margin-top: 10px;
+                font-size: 12px;
+                font-weight: 700;
+                line-height: 1.4;
+                text-align: center;
+                white-space: pre-line;
+              }
             </style>
           </head>
           <body>
@@ -157,7 +167,7 @@ export const printerService = {
             </div>
             
             <div class="divider"></div>
-            <div class="center" style="margin-top: 10px; font-size: 10px; white-space: pre-line;">
+            <div class="receipt-footer">
               ${storeSettings.receiptFooter}
             </div>
           </body>

@@ -197,8 +197,8 @@
 }
 
 .sales-page .sales-panel-heading {
-  padding-bottom: 10px;
-  border-bottom: 2px solid #d5e3e7;
+  padding-bottom: 6px;
+  border-bottom: 1px solid #d5e3e7;
 }
 
 .sales-page .sales-panel-heading .mantine-Text-root {
@@ -206,7 +206,7 @@
 }
 
 .sales-page .sales-scanner-bar {
-  padding: 10px;
+  padding: 8px;
   background: #f2f7f8;
   border: 1px solid #c3d5da;
   border-radius: 8px;
@@ -221,13 +221,57 @@
   background: #fbfdfd;
   border-color: #b4c8ce;
   box-shadow: 0 2px 6px rgba(31, 74, 86, 0.08);
+  height: 100%;
   transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+}
+
+.sales-page .sales-product-name {
+  display: block;
+  min-width: 0;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.sales-page .sales-product-stock {
+  align-self: flex-start;
+  max-width: 100%;
+  white-space: normal;
 }
 
 .sales-page .sales-product-card:hover {
   border-color: #397d91;
   box-shadow: 0 5px 12px rgba(31, 74, 86, 0.16);
   transform: translateY(-1px);
+}
+
+.sales-page .sales-product-card .mantine-Button-root {
+  min-height: 38px;
+}
+
+.sales-page .sales-unit-button .mantine-Button-label {
+  display: block;
+  width: 100%;
+  min-width: 0;
+}
+
+.sales-page .sales-unit-button-content {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.sales-page .sales-unit-button-label {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.sales-page .sales-unit-button-price {
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 
 .sales-page .sales-cart-panel {
@@ -245,5 +289,23 @@
 
   .sales-page .sales-panel {
     box-shadow: 0 4px 14px rgba(26, 67, 79, 0.08);
+  }
+
+  .sales-page .sales-catalog-panel,
+  .sales-page .sales-cart-panel {
+    height: auto !important;
+    min-height: 0 !important;
+  }
+
+  .sales-page .sales-panel-heading {
+    align-items: stretch;
+  }
+
+  .sales-page .sales-panel-heading > .mantine-TextInput-root {
+    width: 100% !important;
+  }
+
+  .sales-page .sales-cart-panel {
+    max-height: 70vh;
   }
 }
