@@ -1,10 +1,12 @@
 // src/components/settings/StoreSettingsPage.jsx
 import React, { useState, useEffect } from 'react';
 import { 
-  Box, Title, Text, Card, TextInput, Textarea, NumberInput, Button, Group, Divider, Loader, FileInput 
+  Box, Title, Text, Card, TextInput, Textarea, NumberInput, Button, Group, Divider, Loader, FileInput, Alert
 } from '@mantine/core';
+import { IconTrash } from '@tabler/icons-react';
 import { notifications } from '@mantine/notifications';
 import { settingsService } from '../../services/settingsService';
+import { cacheManagementService } from '../../services/cacheManagementService';
 import { useAuth } from '../../context/AuthContext';
 
 const compressCompanyLogo = file => new Promise((resolve, reject) => {
@@ -57,6 +59,7 @@ export default function StoreSettingsPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [processingLogo, setProcessingLogo] = useState(false);
+  const [clearingCache, setClearingCache] = useState(false);
   const [formData, setFormData] = useState({
     businessName: '',
     address: '',
@@ -130,6 +133,32 @@ export default function StoreSettingsPage() {
       notifications.show({ title: 'Error', message: err.message || 'Failed to save settings.', color: 'red' });
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleClearCache = async () => {
+    const confirmed = window.confirm(
+      'Clear cached app data on this device? Pending offline changes will be kept and can still sync later. Cached data will reload the next time you use the app.'
+    );
+    if (!confirmed) return;
+
+    setClearingCache(true);
+    try {
+      const result = await cacheManagementService.clearAppCache();
+      notifications.show({
+        title: 'Cache cleared',
+        message: `Cleared ${result.clearedStores} local data stores and ${result.clearedBrowserCaches} browser caches. Pending offline changes were preserved.`,
+        color: 'teal',
+      });
+    } catch (err) {
+      console.error('Failed to clear app cache:', err);
+      notifications.show({
+        title: 'Could not clear cache',
+        message: err.message || 'Please try again.',
+        color: 'red',
+      });
+    } finally {
+      setClearingCache(false);
     }
   };
 
@@ -252,6 +281,25 @@ export default function StoreSettingsPage() {
           </Group>
         </Card>
       </form>
+
+      <Card withBorder radius="md" p="lg" mt="lg">
+        <Text fw={600} size="md" mb="xs">Device Cache</Text>
+        <Alert color="yellow" variant="light" mb="md">
+          Clears cached app data from this device. Pending offline changes are kept. Cached data will be downloaded again as you use the app.
+        </Alert>
+        <Group justify="flex-end">
+          <Button
+            color="red"
+            variant="light"
+            leftSection={<IconTrash size={16} />}
+            onClick={handleClearCache}
+            loading={clearingCache}
+            disabled={clearingCache}
+          >
+            Clear All Cache
+          </Button>
+        </Group>
+      </Card>
     </Box>
   );
 }

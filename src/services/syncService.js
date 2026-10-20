@@ -568,20 +568,25 @@ export const syncService = {
                 throw new Error('This adjustment would consume stock reserved for offline terminals.');
               }
               const adjustment = Number(item.amount);
-              const incomingCost = Number(sanitizedData.costPrice || 0);
-              const previousStock = Number(productData.stock || 0);
-              const previousCost = Number(productData.costPrice || 0);
-              const nextCost = nextStock > 0
-                ? ((previousStock * previousCost) + (adjustment * incomingCost)) / nextStock
-                : incomingCost;
-              transaction.update(docRef, {
+              const productUpdate = {
                 stock: nextStock,
-                costPrice: nextCost,
-                lastStockAdjustmentAt: sanitizedData.adjustmentDate || new Date().toISOString(),
-                lastStockAdjustmentQuantity: adjustment,
-                lastStockAdjustmentCostPrice: incomingCost,
                 updatedAt: serverTimestamp()
-              });
+              };
+              if (!item.preserveCost) {
+                const incomingCost = Number(sanitizedData.costPrice || 0);
+                const previousStock = Number(productData.stock || 0);
+                const previousCost = Number(productData.costPrice || 0);
+                const nextCost = nextStock > 0
+                  ? ((previousStock * previousCost) + (adjustment * incomingCost)) / nextStock
+                  : incomingCost;
+                Object.assign(productUpdate, {
+                  costPrice: nextCost,
+                  lastStockAdjustmentAt: sanitizedData.adjustmentDate || new Date().toISOString(),
+                  lastStockAdjustmentQuantity: adjustment,
+                  lastStockAdjustmentCostPrice: incomingCost
+                });
+              }
+              transaction.update(docRef, productUpdate);
             });
           }
           else if (item.type === 'DELETE_PRODUCT') {

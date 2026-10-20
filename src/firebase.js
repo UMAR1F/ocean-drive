@@ -1,33 +1,32 @@
-// Import the functions you need from the SDKs you need
-import { initializeApp } from "firebase/app";
-import { getAnalytics, isSupported } from "firebase/analytics";
-import { getAuth } from "firebase/auth";
-import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager, getFirestore } from "firebase/firestore";
+import { getAnalytics, isSupported } from 'firebase/analytics';
+import { initializeApp } from 'firebase/app';
+import { getAuth } from 'firebase/auth';
+import {
+  initializeFirestore,
+  persistentLocalCache,
+  persistentMultipleTabManager,
+} from 'firebase/firestore';
 
-// Your web app's Firebase configuration
 const firebaseConfig = {
-  apiKey: "AIzaSyAVTdyvPs6rj04P8YszZc_V5CejEqZ67ig",
-  authDomain: "base64toimg.firebaseapp.com",
-  databaseURL: "https://base64toimg-default-rtdb.firebaseio.com",
-  projectId: "base64toimg",
-  storageBucket: "base64toimg.firebasestorage.app",
-  messagingSenderId: "128235407609",
-  appId: "1:128235407609:web:1a70d8bec5aaac3e79ba28",
-  measurementId: "G-E66JSM3YQB"
+  apiKey: 'AIzaSyCbVYP0VtIfZDZmueF-TaNr1ejPIjm5XP4',
+  authDomain: 'nhealthfitness-9f0d0.firebaseapp.com',
+  databaseURL: 'https://nhealthfitness-9f0d0-default-rtdb.firebaseio.com',
+  projectId: 'nhealthfitness-9f0d0',
+  storageBucket: 'nhealthfitness-9f0d0.firebasestorage.app',
+  messagingSenderId: '72072154106',
+  appId: '1:72072154106:web:354b7788a3df6d8197f243',
+  measurementId: 'G-N0THSN228M',
 };
 
-// Initialize Firebase
 const app = initializeApp(firebaseConfig);
 
-// Initialize Auth and Firestore with native persistent offline cache enabled
 export const auth = getAuth(app);
 export const db = initializeFirestore(app, {
   localCache: persistentLocalCache({
-    tabManager: persistentMultipleTabManager()
-  })
+    tabManager: persistentMultipleTabManager(),
+  }),
 });
 
-// Conditionally initialize analytics so it never crashes the app
 let analytics = null;
 isSupported().then((supported) => {
   if (supported) {

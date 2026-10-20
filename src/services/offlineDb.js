@@ -15,7 +15,7 @@ export const openDB = () => {
     request.onerror = (event) => {
       console.error("IndexedDB open error:", event.target.error);
       reject(event.target.error);
-    };
+    }
 
     request.onsuccess = (event) => {
       resolve(event.target.result);

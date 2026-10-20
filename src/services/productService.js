@@ -122,6 +122,9 @@ export const productService = {
       piecesPerCrate: productData.piecesPerCrate !== undefined && productData.piecesPerCrate !== '' ? Number(productData.piecesPerCrate) : null,
       pricePerCarton: productData.pricePerCarton !== undefined && productData.pricePerCarton !== '' ? Number(productData.pricePerCarton) : null,
       pricePerCrate: productData.pricePerCrate !== undefined && productData.pricePerCrate !== '' ? Number(productData.pricePerCrate) : null,
+      lastStockAdjustmentAt: productData.lastStockAdjustmentAt || null,
+      lastStockAdjustmentQuantity: productData.lastStockAdjustmentQuantity !== undefined && productData.lastStockAdjustmentQuantity !== '' ? Number(productData.lastStockAdjustmentQuantity) : null,
+      lastStockAdjustmentCostPrice: productData.lastStockAdjustmentCostPrice !== undefined && productData.lastStockAdjustmentCostPrice !== '' ? Number(productData.lastStockAdjustmentCostPrice) : null,
       createdAt: timestamp,
       updatedAt: timestamp
     };
@@ -247,22 +250,27 @@ export const productService = {
       }
     } catch (error) {
       console.error("Error updating product:", error);
+      throw error;
     }
   },
 
-  async adjustStock(id, amount, { costPrice = 0, adjustmentDate = new Date().toISOString().slice(0, 10) } = {}) {
+  async adjustStock(id, amount, {
+    costPrice = 0,
+    adjustmentDate = new Date().toISOString().slice(0, 10),
+    preserveCost = false,
+    queueSync = true,
+    localOnly = false
+  } = {}) {
     const adjustment = Number(amount);
     if (!id || !Number.isFinite(adjustment) || adjustment === 0) return { queued: false };
     const stringId = String(id);
     const incomingCost = Number(costPrice);
-    if (!Number.isFinite(incomingCost) || incomingCost < 0) throw new Error('Enter a valid cost price.');
+    if (!preserveCost && (!Number.isFinite(incomingCost) || incomingCost < 0)) throw new Error('Enter a valid cost price.');
     const normalizedDate = new Date(`${adjustmentDate}T12:00:00`);
     if (Number.isNaN(normalizedDate.getTime())) throw new Error('Enter a valid stock update date.');
-    const adjustmentData = {
-      costPrice: incomingCost,
-      adjustmentDate: normalizedDate.toISOString()
-    };
-    if (!navigator.onLine) {
+    const adjustmentData = { adjustmentDate: normalizedDate.toISOString() };
+    if (!preserveCost) adjustmentData.costPrice = incomingCost;
+    if (!navigator.onLine || localOnly) {
       const products = await offlineDb.getAll(COLLECTION_NAME);
       const product = products.find((item) => String(item.id) === stringId);
       const nextStock = Number(product?.stock || 0) + adjustment;
@@ -270,23 +278,36 @@ export const productService = {
         throw new Error('This adjustment would consume stock reserved for offline terminals.');
       }
       await offlineDb.adjustStock(COLLECTION_NAME, id, adjustment);
-      const previousStock = Number(product.stock || 0);
-      const previousCost = Number(product.costPrice || 0);
-      const nextCost = nextStock > 0
-        ? ((previousStock * previousCost) + (adjustment * incomingCost)) / nextStock
-        : incomingCost;
-      await offlineDb.update(COLLECTION_NAME, id, {
-        costPrice: nextCost,
-        lastStockAdjustmentAt: normalizedDate.toISOString(),
-        lastStockAdjustmentQuantity: adjustment,
-        lastStockAdjustmentCostPrice: incomingCost
-      });
-      await syncService.addToQueue({ type: 'ADJUST_STOCK', collection: COLLECTION_NAME, id: stringId, amount: adjustment, data: adjustmentData });
+      let nextCost = Number(product.costPrice || 0);
+      if (!preserveCost) {
+        const previousStock = Number(product.stock || 0);
+        nextCost = nextStock > 0
+          ? ((previousStock * nextCost) + (adjustment * incomingCost)) / nextStock
+          : incomingCost;
+        await offlineDb.update(COLLECTION_NAME, id, {
+          costPrice: nextCost,
+          lastStockAdjustmentAt: normalizedDate.toISOString(),
+          lastStockAdjustmentQuantity: adjustment,
+          lastStockAdjustmentCostPrice: incomingCost
+        });
+      }
+      if (queueSync) {
+        await syncService.addToQueue({
+          type: 'ADJUST_STOCK',
+          collection: COLLECTION_NAME,
+          id: stringId,
+          amount: adjustment,
+          data: adjustmentData,
+          preserveCost
+        });
+      }
       await auditService.logAction({
-        actionType: 'STOCK_ADJUSTED_OFFLINE',
+        actionType: preserveCost ? 'RETURN_STOCKED_OFFLINE' : 'STOCK_ADJUSTED_OFFLINE',
         entityId: stringId,
         entityName: product.name || stringId,
-        details: `Added ${adjustment} units at cost ₦${incomingCost.toFixed(2)} on ${adjustmentDate}.`,
+        details: preserveCost
+          ? `Restocked ${adjustment} returned units without changing product cost.`
+          : `Added ${adjustment} units at cost ₦${incomingCost.toFixed(2)} on ${adjustmentDate}.`,
         user: auth.currentUser
       });
       return { queued: true };
@@ -303,27 +324,47 @@ export const productService = {
       if (nextStock < reservedUnits) {
         throw new Error('This adjustment would consume stock reserved for offline terminals.');
       }
-      const previousStock = Number(productData.stock || 0);
-      const previousCost = Number(productData.costPrice || 0);
-      const nextCost = nextStock > 0
-        ? ((previousStock * previousCost) + (adjustment * incomingCost)) / nextStock
-        : incomingCost;
-      transaction.update(docRef, {
+      const productUpdate = {
         stock: increment(adjustment),
-        costPrice: nextCost,
-        lastStockAdjustmentAt: normalizedDate.toISOString(),
-        lastStockAdjustmentQuantity: adjustment,
-        lastStockAdjustmentCostPrice: incomingCost,
         updatedAt: serverTimestamp()
-      });
-      updatedProduct = { ...productData, id: stringId, stock: nextStock, costPrice: nextCost, lastStockAdjustmentAt: normalizedDate.toISOString() };
+      };
+      let nextCost = Number(productData.costPrice || 0);
+      if (!preserveCost) {
+        const previousStock = Number(productData.stock || 0);
+        nextCost = nextStock > 0
+          ? ((previousStock * nextCost) + (adjustment * incomingCost)) / nextStock
+          : incomingCost;
+        Object.assign(productUpdate, {
+          costPrice: nextCost,
+          lastStockAdjustmentAt: normalizedDate.toISOString(),
+          lastStockAdjustmentQuantity: adjustment,
+          lastStockAdjustmentCostPrice: incomingCost
+        });
+      }
+      transaction.update(docRef, productUpdate);
+      updatedProduct = {
+        ...productData,
+        id: stringId,
+        stock: nextStock,
+        updatedAt: new Date().toISOString()
+      };
+      if (!preserveCost) {
+        Object.assign(updatedProduct, {
+          costPrice: nextCost,
+          lastStockAdjustmentAt: normalizedDate.toISOString(),
+          lastStockAdjustmentQuantity: adjustment,
+          lastStockAdjustmentCostPrice: incomingCost
+        });
+      }
     });
     await offlineDb.put(COLLECTION_NAME, updatedProduct);
     await auditService.logAction({
-      actionType: 'STOCK_ADJUSTED',
+      actionType: preserveCost ? 'RETURN_STOCKED' : 'STOCK_ADJUSTED',
       entityId: stringId,
       entityName: updatedProduct.name || stringId,
-      details: `Added ${adjustment} units at cost ₦${incomingCost.toFixed(2)} on ${adjustmentDate}.`,
+      details: preserveCost
+        ? `Restocked ${adjustment} returned units without changing product cost.`
+        : `Added ${adjustment} units at cost ₦${incomingCost.toFixed(2)} on ${adjustmentDate}.`,
       user: auth.currentUser
     });
     return { queued: false };

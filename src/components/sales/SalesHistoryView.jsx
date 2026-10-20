@@ -1,5 +1,5 @@
 // src/components/sales/SalesHistoryView.jsx
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { 
   Box, Card, Text, TextInput, Button, Group, Stack, 
   Table, Badge, Modal, Alert, Skeleton, ActionIcon, Tooltip, Select, Pagination, Divider, SimpleGrid, useMantineColorScheme 
@@ -14,7 +14,9 @@ import {
   IconX,
   IconEye,
   IconPrinter,
-  IconFileSpreadsheet
+  IconFileSpreadsheet,
+  IconBarcode,
+  IconCamera
 } from '@tabler/icons-react';
 import { useDisclosure } from '@mantine/hooks';
 import { notifications } from '@mantine/notifications';
@@ -22,6 +24,124 @@ import { salesService } from '../../services/salesService';
 import { useAuth } from '../../context/AuthContext';
 import ReceiptModal from './ReceiptModal'; // Import ReceiptModal for reprinting
 import { exportReportToExcel } from '../../services/excelExportService';
+import { Html5Qrcode } from 'html5-qrcode';
+
+function ReceiptBarcodeLookup({ sales, onSaleFound }) {
+  const [barcode, setBarcode] = useState('');
+  const [cameraOpen, setCameraOpen] = useState(false);
+  const scannerRef = useRef(null);
+  const lookupSale = useCallback((value) => {
+    const rawValue = String(value || '').trim();
+    if (!rawValue) return;
+
+    const normalizedValue = rawValue.replace(/\s+/g, '').toUpperCase();
+    const sale = sales.find((item) => {
+      const itemId = String(item.id || '');
+      const cleanedId = itemId.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+      return itemId === rawValue || cleanedId === normalizedValue || itemId === normalizedValue || itemId.endsWith(normalizedValue);
+    });
+
+    if (!sale) {
+      notifications.show({
+        title: 'Sale not found',
+        message: 'No accessible sale matches this barcode. Refresh sales history and try again.',
+        color: 'orange',
+      });
+      return;
+    }
+    onSaleFound(sale);
+  }, [onSaleFound, sales]);
+
+  useEffect(() => {
+    if (!cameraOpen) return undefined;
+
+    let mounted = true;
+    const scanner = new Html5Qrcode('receipt-barcode-reader');
+    scannerRef.current = scanner;
+    scanner.start(
+      { facingMode: 'environment' },
+      { fps: 10, qrbox: { width: 250, height: 100 } },
+      (decodedText) => {
+        if (!mounted) return;
+        setBarcode(decodedText);
+        lookupSale(decodedText);
+        setCameraOpen(false);
+      },
+      () => {}
+    ).catch((error) => {
+      if (!mounted) return;
+      console.error('Could not start receipt barcode scanner:', error);
+      notifications.show({
+        title: 'Scanner failed',
+        message: error.message || 'Could not start the camera scanner.',
+        color: 'red',
+      });
+      setCameraOpen(false);
+    });
+
+    return () => {
+      mounted = false;
+      const activeScanner = scannerRef.current;
+      scannerRef.current = null;
+      if (!activeScanner) return;
+      const clearScanner = () => {
+        try {
+          activeScanner.clear();
+        } catch (error) {
+          console.warn('Could not clear receipt barcode scanner:', error);
+        }
+      };
+      if (activeScanner.isScanning) {
+        activeScanner.stop().then(clearScanner).catch((error) => {
+          console.warn('Could not stop receipt barcode scanner:', error);
+          clearScanner();
+        });
+      } else {
+        clearScanner();
+      }
+    };
+  }, [cameraOpen, lookupSale]);
+
+  return (
+    <Stack gap="xs" mb="md">
+      <Group gap="xs" wrap="wrap">
+        <TextInput
+          aria-label="Scan a receipt barcode"
+          placeholder="Scan receipt barcode or enter sale ID"
+          leftSection={<IconBarcode size={16} />}
+          value={barcode}
+          onChange={(event) => setBarcode(event.currentTarget.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') {
+              event.preventDefault();
+              lookupSale(barcode);
+            }
+          }}
+          style={{ flex: '1 1 260px' }}
+        />
+        <Button onClick={() => lookupSale(barcode)}>Find Sale</Button>
+        <Button
+          variant="light"
+          leftSection={<IconCamera size={16} />}
+          onClick={() => {
+            if (!cameraOpen && (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia)) {
+              notifications.show({
+                title: 'Camera unavailable',
+                message: 'Camera scanning requires HTTPS (or localhost) and camera access.',
+                color: 'orange',
+              });
+              return;
+            }
+            setCameraOpen((open) => !open);
+          }}
+        >
+          {cameraOpen ? 'Close Camera' : 'Scan with Camera'}
+        </Button>
+      </Group>
+      {cameraOpen && <Box id="receipt-barcode-reader" maw={400} />}
+    </Stack>
+  );
+}
 
 export default function SalesHistoryView() {
   const { user, currentUser, userRole } = useAuth();
@@ -96,6 +216,11 @@ export default function SalesHistoryView() {
     setSaleForReceipt(sale);
     openReceiptModal();
   };
+
+  const handleScannedReceipt = useCallback((sale) => {
+    setSaleForReceipt(sale);
+    openReceiptModal();
+  }, [openReceiptModal]);
 
   const handleOpenRefundModal = (e, sale) => {
     e.stopPropagation(); // Prevent row click bubbling
@@ -295,6 +420,11 @@ export default function SalesHistoryView() {
             </Tooltip>
           </Group>
         </Group>
+
+        <ReceiptBarcodeLookup
+          sales={sales}
+          onSaleFound={handleScannedReceipt}
+        />
 
         {/* Summary follows the current search and filters. */}
         <SimpleGrid cols={{ base: 2, sm: 4 }} mb="lg">

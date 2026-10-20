@@ -1,5 +1,5 @@
 // src/components/inventory/ProductsPage.jsx
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { 
   Title, 
   TextInput, 
@@ -23,8 +23,13 @@ import {
   Divider
 } from "@mantine/core";
 import { useMediaQuery } from "@mantine/hooks";
-import { IconTrash, IconEdit, IconPlus, IconCurrencyNaira, IconBoxSeam } from "@tabler/icons-react";
+import { IconTrash, IconEdit, IconPlus, IconCurrencyNaira, IconBoxSeam, IconDownload, IconUpload } from "@tabler/icons-react";
 import { productService } from "../../services/productService";
+import {
+  downloadProductImportTemplate,
+  exportProductsToSpreadsheet,
+  readProductsFromSpreadsheet,
+} from "../../services/productSpreadsheetService";
 import { categoryService } from "../../services/categoryService";
 import BarcodeScannerInput from "../common/BarcodeScannerInput";
 import StockAdjustmentModal from "./StockAdjustmentModal";
@@ -32,6 +37,7 @@ import { notifications } from "@mantine/notifications";
 import { getProductEntryMode, PRODUCT_ENTRY_MODES, saveProductEntryMode } from "../../utils/productEntryModes";
 
 const formatStockUpdate = (value) => value ? new Date(value).toLocaleDateString() : 'Not recorded';
+const normalizeIdentifier = (value) => String(value || '').trim().toLowerCase();
 
 export default function ProductsPage() {
   const [products, setProducts] = useState([]);
@@ -41,6 +47,8 @@ export default function ProductsPage() {
   const [categoryFilter, setCategoryFilter] = useState('all');
   const [stockProduct, setStockProduct] = useState(null);
   const [stockLoading, setStockLoading] = useState(false);
+  const [spreadsheetLoading, setSpreadsheetLoading] = useState(false);
+  const importInputRef = useRef(null);
   
   const initialFormState = {
     entryMode: 'wholesale',
@@ -82,6 +90,138 @@ export default function ProductsPage() {
       console.error("Error loading products data:", error);
     } finally {
       if (showLoading) setLoading(false);
+    }
+  };
+
+  const handleExportProducts = async () => {
+    setSpreadsheetLoading(true);
+    try {
+      const result = await exportProductsToSpreadsheet(products);
+      if (result.aborted) return;
+      notifications.show({
+        title: 'Product export ready',
+        message: `${products.length} product${products.length === 1 ? '' : 's'} exported to Excel.`,
+        color: 'teal',
+      });
+    } catch (error) {
+      console.error('Error exporting products:', error);
+      notifications.show({ title: 'Export failed', message: error.message || 'Could not export products.', color: 'red' });
+    } finally {
+      setSpreadsheetLoading(false);
+    }
+  };
+
+  const handleDownloadImportTemplate = async () => {
+    setSpreadsheetLoading(true);
+    try {
+      const result = await downloadProductImportTemplate();
+      if (!result.aborted) {
+        notifications.show({ title: 'Template downloaded', message: 'Fill in the template and import it to add or update products.', color: 'teal' });
+      }
+    } catch (error) {
+      console.error('Error downloading product template:', error);
+      notifications.show({ title: 'Template download failed', message: error.message || 'Could not download the template.', color: 'red' });
+    } finally {
+      setSpreadsheetLoading(false);
+    }
+  };
+
+  const handleImportProducts = async (event) => {
+    const input = event.currentTarget;
+    const file = input.files?.[0];
+    if (!file) return;
+
+    setSpreadsheetLoading(true);
+    try {
+      const rows = await readProductsFromSpreadsheet(file);
+      const failures = [];
+      let added = 0;
+      let updated = 0;
+      const importedProducts = [...products];
+
+      for (const row of rows) {
+        if (row.error) {
+          failures.push(`Row ${row.rowNumber}: ${row.error}`);
+          continue;
+        }
+
+        try {
+          const importedProduct = row.product;
+          const importedId = normalizeIdentifier(row.id);
+          const sku = normalizeIdentifier(importedProduct.sku);
+          const barcode = normalizeIdentifier(importedProduct.barcode);
+          const idMatches = importedId
+            ? importedProducts.filter((product) => normalizeIdentifier(product.id) === importedId)
+            : [];
+          const skuMatches = sku
+            ? importedProducts.filter((product) => normalizeIdentifier(product.sku) === sku)
+            : [];
+          const barcodeMatches = barcode
+            ? importedProducts.filter((product) => normalizeIdentifier(product.barcode) === barcode)
+            : [];
+          const matches = [...new Set([...idMatches, ...skuMatches, ...barcodeMatches])];
+
+          if (matches.length > 1) {
+            throw new Error('SKU and barcode identify different products, or an identifier is not unique.');
+          }
+
+          const categoryName = normalizeIdentifier(importedProduct.categoryName);
+          const importedCategoryId = String(importedProduct.categoryId || '').trim();
+          const category = categories.find((item) => (
+            (importedCategoryId && String(item.id) === importedCategoryId)
+            || (categoryName && normalizeIdentifier(item.name || item.title || item.categoryName) === categoryName)
+          ));
+
+          if (matches.length === 1) {
+            const existing = matches[0];
+            const updateData = Object.fromEntries(
+              row.providedFields
+                .filter((field) => field !== 'id')
+                .map((field) => [field, importedProduct[field]])
+            );
+            if (row.providedFields.includes('categoryId') || row.providedFields.includes('categoryName')) {
+              updateData.categoryId = category?.id || importedCategoryId || '';
+              updateData.categoryName = category?.name || importedProduct.categoryName || existing.categoryName || 'Uncategorized';
+            }
+            await productService.updateProduct(existing.id, updateData);
+            const updatedProduct = { ...existing, ...updateData };
+            importedProducts[importedProducts.findIndex((product) => product.id === existing.id)] = updatedProduct;
+            updated += 1;
+          } else {
+            const newProduct = {
+              ...importedProduct,
+              categoryId: category?.id || importedCategoryId || '',
+              categoryName: category?.name || importedProduct.categoryName || 'Uncategorized',
+            };
+            const savedProduct = await productService.addProduct(newProduct);
+            importedProducts.push(savedProduct);
+            added += 1;
+          }
+        } catch (error) {
+          failures.push(`Row ${row.rowNumber}: ${error.message || 'Could not save this product.'}`);
+        }
+      }
+
+      await loadData(false);
+      const successCount = added + updated;
+      const detail = [
+        `${added} added`,
+        `${updated} updated`,
+        `${failures.length} failed`,
+      ].join(', ');
+      const failureDetails = failures.length ? ` ${failures.slice(0, 3).join(' ')}` : '';
+      notifications.show({
+        title: failures.length ? 'Product import completed with errors' : 'Products imported',
+        message: `${detail}.${failureDetails}`,
+        color: failures.length ? (successCount ? 'yellow' : 'red') : 'teal',
+        autoClose: failures.length ? false : 5000,
+      });
+    } catch (error) {
+      console.error('Error importing products:', error);
+      notifications.show({ title: 'Import failed', message: error.message || 'Could not read the spreadsheet.', color: 'red' });
+    } finally {
+      input.value = '';
+      setSpreadsheetLoading(false);
     }
   };
 
@@ -227,6 +367,38 @@ export default function ProductsPage() {
       <Group justify="space-between" align="center">
         <Title order={2} size="h3">Products Management</Title>
         <Badge size="lg" variant="dot">{products.length} Total Items</Badge>
+      </Group>
+      <Group justify="flex-end" gap="xs" wrap="wrap">
+        <Button
+          variant="light"
+          leftSection={<IconDownload size={16} />}
+          onClick={handleExportProducts}
+          loading={spreadsheetLoading}
+        >
+          Export Excel
+        </Button>
+        <Button
+          variant="default"
+          leftSection={<IconDownload size={16} />}
+          onClick={handleDownloadImportTemplate}
+          disabled={spreadsheetLoading}
+        >
+          Download Template
+        </Button>
+        <Button
+          leftSection={<IconUpload size={16} />}
+          onClick={() => importInputRef.current?.click()}
+          loading={spreadsheetLoading}
+        >
+          Import Excel
+        </Button>
+        <input
+          ref={importInputRef}
+          type="file"
+          accept=".xlsx,.xls,.csv"
+          hidden
+          onChange={handleImportProducts}
+        />
       </Group>
 
       {/* Form Section */}

@@ -1,9 +1,10 @@
 // src/components/sales/ReceiptModal.jsx
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Modal, Stack, Box, Text, Divider, Group, Button } from '@mantine/core';
 import { settingsService } from '../../services/settingsService';
 import { printerService } from '../../services/printerService';
 import { notifications } from '@mantine/notifications';
+import { renderSaleBarcode } from '../../utils/saleBarcode';
 
 export default function ReceiptModal({ opened, onClose, saleData }) {
   const [storeSettings, setStoreSettings] = useState({
@@ -17,12 +18,19 @@ export default function ReceiptModal({ opened, onClose, saleData }) {
     companyLogoDataUrl: ''
   });
   const [printing, setPrinting] = useState(false);
+  const barcodeRef = useRef(null);
 
   useEffect(() => {
     if (opened) {
       loadSettings();
     }
   }, [opened]);
+
+  useEffect(() => {
+    if (opened && saleData?.id && barcodeRef.current) {
+      renderSaleBarcode(barcodeRef.current, saleData.id);
+    }
+  }, [opened, saleData?.id]);
 
   const loadSettings = async () => {
     try {
@@ -82,13 +90,19 @@ export default function ReceiptModal({ opened, onClose, saleData }) {
           
           <Text size="xs" fw={500}>Sales Receipt</Text>
           <Text size="xs" c="dimmed">{new Date(saleData.createdAt || Date.now()).toLocaleString()}</Text>
+          <Text size="xs" fw={600}>Sale ID: {saleData.id || 'Unavailable'}</Text>
+          <Text size="xs">Cashier: {saleData.cashierName || saleData.cashierEmail?.split('@')[0] || 'Staff'}</Text>
+          <Text size="xs" c="dimmed">{saleData.cashierEmail || ''}</Text>
         </Box>
 
         <Divider label="Items" labelPosition="center" />
         
         {saleData.items.map((item, index) => (
           <Group key={index} justify="space-between">
-            <Text size="sm">{item.name} (x{item.quantity})</Text>
+            <Box>
+              <Text size="sm">{item.name} (x{item.quantity})</Text>
+              {item.barcode && <Text size="xs" c="dimmed">Barcode: {item.barcode}</Text>}
+            </Box>
             <Text size="sm" fw={600}>{currencySymbol}{(item.price * item.quantity).toFixed(2)}</Text>
           </Group>
         ))}
@@ -124,6 +138,13 @@ export default function ReceiptModal({ opened, onClose, saleData }) {
           <Text size="md" fw={700}>Total:</Text>
           <Text size="md" fw={700} c="green">{currencySymbol}{Number(saleData.total || 0).toFixed(2)}</Text>
         </Group>
+
+        {saleData.id && (
+          <Box ta="center" mt="md">
+            <svg ref={barcodeRef} role="img" aria-label={`Barcode for sale ${saleData.id}`} style={{ display: 'block', width: '100%', maxWidth: 360, height: 'auto', margin: '0 auto' }} />
+            <Text size="xs" c="dimmed">Scan to find this sale</Text>
+          </Box>
+        )}
 
         <Box ta="center" mt="xl">
           <Text size="sm" fw={700} c="dark" style={{ whiteSpace: 'pre-line' }}>{storeSettings.receiptFooter}</Text>

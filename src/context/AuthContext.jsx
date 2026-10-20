@@ -42,6 +42,7 @@ export const AuthProvider = ({ children }) => {
         const assignedRole = normalizeRole(userData.role);
         currentUser.role = assignedRole;
         currentUser.userRole = assignedRole;
+        currentUser.fullName = userData.fullName || userData.name || currentUser.displayName || '';
         setUserRole(assignedRole);
         setUser(currentUser);
         setLoading(false);

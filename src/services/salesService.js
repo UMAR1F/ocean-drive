@@ -85,6 +85,7 @@ export const salesService = {
         return {
           productId: item.id,
           name: item.name,
+          barcode: item.barcode || '',
           unitType: item.selectedUnitType || 'piece',
           price: itemPrice,
           quantity: item.quantity,
@@ -108,6 +109,7 @@ export const salesService = {
       change: paymentDetails.change || 0,
       cashierId: cashierUser?.uid || cashierUser?.id || 'unknown',
       cashierEmail: cashierUser?.email || 'staff@skylightethic.com',
+      cashierName: cashierUser?.fullName || cashierUser?.displayName || cashierUser?.name || cashierUser?.email?.split('@')[0] || 'Staff',
       deviceId: offlineStockService.getCurrentDeviceId(),
       status: 'completed',
       createdAt: timestamp
@@ -383,7 +385,11 @@ export const salesService = {
 
         for (const item of targetSale.items) {
           const unitsToRestock = item.unitsDeducted || item.quantity;
-          await productService.adjustStock(item.productId, unitsToRestock);
+          await productService.adjustStock(item.productId, unitsToRestock, {
+            preserveCost: true,
+            queueSync: isLocalId,
+            localOnly: isLocalId
+          });
         }
 
         if (!isLocalId) {

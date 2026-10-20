@@ -1,6 +1,7 @@
 // src/services/printerService.js
 import { notifications } from '@mantine/notifications';
 import { settingsService } from './settingsService';
+import { createSaleBarcodeDataUri } from '../utils/saleBarcode';
 
 const PRINTER_CONFIG_KEY = 'skylight_printer_config';
 
@@ -36,8 +37,6 @@ export const printerService = {
     const config = this.getConfig();
     const paperWidth = config.printerWidth === '50mm' ? 50 : 88;
     const contentWidth = config.printerWidth === '50mm' ? 48 : 80;
-
-    // Fetch dynamic store settings for the receipt template
     let storeSettings = {
       businessName: 'Skylight Ethic POS',
       address: '',
@@ -64,7 +63,7 @@ export const printerService = {
       if (!printWindow) {
         throw new Error('Popup blocked. Please allow popups to print receipts.');
       }
-
+      const saleBarcode = saleData.id ? createSaleBarcodeDataUri(saleData.id) : '';
       const receiptHtml = `
         <!DOCTYPE html>
         <html>
@@ -116,6 +115,9 @@ export const printerService = {
             
             <div class="center" style="font-size: 11px; font-weight: bold;">Sales Receipt</div>
             <div class="center" style="font-size: 10px; margin-bottom: 5px;">${new Date(saleData.createdAt || Date.now()).toLocaleString()}</div>
+            <div class="center" style="font-size: 10px;">Sale ID: ${saleData.id || 'Unavailable'}</div>
+            <div class="center" style="font-size: 10px;">Cashier: ${saleData.cashierName || saleData.cashierEmail?.split('@')[0] || 'Staff'}</div>
+            <div class="center" style="font-size: 10px;">${saleData.cashierEmail || ''}</div>
             
             <div class="divider"></div>
             
@@ -130,7 +132,7 @@ export const printerService = {
               <tbody>
                 ${saleData.items.map(item => `
                   <tr>
-                    <td>${item.name}</td>
+                    <td>${item.name}${item.barcode ? `<br><span style="font-size:10px;">Barcode: ${item.barcode}</span>` : ''}</td>
                     <td class="center">${item.quantity}</td>
                     <td class="right">${currencySymbol}${(item.price * item.quantity).toFixed(2)}</td>
                   </tr>
@@ -167,6 +169,7 @@ export const printerService = {
             </div>
             
             <div class="divider"></div>
+            ${saleBarcode ? `<div class="center" style="margin: 3mm 0;"><img src="${saleBarcode}" alt="Sale barcode" style="display:block;width:100%;max-width:${contentWidth}mm;height:auto;margin:0 auto;"><div style="font-size:10px;">Scan to find this sale</div></div>` : ''}
             <div class="receipt-footer">
               ${storeSettings.receiptFooter}
             </div>
